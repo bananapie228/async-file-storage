@@ -125,6 +125,8 @@ func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*dom
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() { _ = rows.Close() }()
+
 	var files []domain.FileEntry
 	for rows.Next() {
 		var f domain.FileEntry
