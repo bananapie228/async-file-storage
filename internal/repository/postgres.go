@@ -4,6 +4,7 @@ import (
 	"async-file-storage/internal/domain"
 	"context"
 	"database/sql"
+	"errors" // Добавили для проверки ошибок
 	"fmt"
 	"time"
 
@@ -14,8 +15,18 @@ type PostgresRepository struct {
 	db *sql.DB
 }
 
+// creates a new instance of the repository.
 func NewPostgresRepository(dsn string) (*PostgresRepository, error) {
 	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to ping db: %w", err)
+	}
+
 	_, err = db.Exec(`
     CREATE TABLE IF NOT EXISTS requests (
         id SERIAL PRIMARY KEY,
@@ -24,39 +35,36 @@ func NewPostgresRepository(dsn string) (*PostgresRepository, error) {
     );
 `)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open db: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping db: %w", err)
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to create requests table: %w", err)
 	}
 
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS files (
-			id SERIAL PRIMARY KEY,
-			request_id INTEGER REFERENCES requests(id),
-			url TEXT NOT NULL,
-			data BYTEA, 
-			error_msg TEXT
-		);
-	`)
+       CREATE TABLE IF NOT EXISTS files (
+          id SERIAL PRIMARY KEY,
+          request_id INTEGER REFERENCES requests(id),
+          url TEXT NOT NULL,
+          data BYTEA, 
+          error_msg TEXT
+       );
+    `)
 
 	if err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to create files table: %w", err)
 	}
 	return &PostgresRepository{db: db}, nil
 }
+
+// creates a new download request and its file entries.
 func (r *PostgresRepository) CreateRequest(ctx context.Context, urls []string) (int, error) {
-	// begin transaction
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	defer func() {
 		_ = tx.Rollback()
 	}()
-
-	// create request with status "Process"
 
 	var requestID int
 	err = tx.QueryRowContext(ctx,
@@ -64,27 +72,25 @@ func (r *PostgresRepository) CreateRequest(ctx context.Context, urls []string) (
 		domain.StatusProcess, time.Now(),
 	).Scan(&requestID)
 
-	//return error if failed to insert
-
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert: %w", err)
 	}
 
-	query := "INSERT INTO files (request_ID,  url) VALUES ($1, $2)"
+	query := "INSERT INTO files (request_id, url) VALUES ($1, $2)"
 	for _, url := range urls {
 		_, err = tx.ExecContext(ctx, query, requestID, url)
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert files: %w", err)
 		}
 	}
-	// commit transaction
+
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return requestID, nil
 }
 
-// change status of request
+// UpdateRequestStatus changes the status of a specific request.
 func (r *PostgresRepository) UpdateRequestStatus(ctx context.Context, id int, status domain.Status) error {
 	_, err := r.db.ExecContext(ctx,
 		"UPDATE requests SET status = $1 WHERE id = $2",
@@ -92,7 +98,7 @@ func (r *PostgresRepository) UpdateRequestStatus(ctx context.Context, id int, st
 	return err
 }
 
-// save files or errors
+// UpdateFileStatus saves file data or records an error message.
 func (r *PostgresRepository) UpdateFileStatus(ctx context.Context, requestID int, url string, data []byte, downloadErr error) error {
 	var errMsg string
 	if downloadErr != nil {
@@ -100,28 +106,29 @@ func (r *PostgresRepository) UpdateFileStatus(ctx context.Context, requestID int
 	}
 
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE files SET data = $1, err_Msg = $2 WHERE requetID = $3 AND url = %4",
+		"UPDATE files SET data = $1, error_msg = $2 WHERE request_id = $3 AND url = $4",
 		data, errMsg, requestID, url)
 	return err
 }
 
+// GetRequestStatus returns the request and all associated files.
 func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*domain.DownloadRequest, []domain.FileEntry, error) {
 	req := &domain.DownloadRequest{}
+	// Поправил WHEERE -> WHERE
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, status, created_at FROM requests WHEERE id = $1", id,
+		"SELECT id, status, created_at FROM requests WHERE id = $1", id,
 	).Scan(&req.ID, &req.Status, &req.CreatedAt)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, fmt.Errorf("request not found")
 	}
 	if err != nil {
 		return nil, nil, err
 	}
+
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT id, request_id, url, error_msg FROM files WHERE request_id = $1", id,
 	)
-	defer rows.Close()
-
 	if err != nil {
 		return nil, nil, err
 	}
@@ -130,13 +137,12 @@ func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*dom
 	var files []domain.FileEntry
 	for rows.Next() {
 		var f domain.FileEntry
-		// error_msg might be NULL, use sql.NullString for scanning
 		var dbErr sql.NullString
 
 		if err := rows.Scan(&f.ID, &f.RequestID, &f.URL, &dbErr); err != nil {
 			return nil, nil, err
 		}
-		f.Error = dbErr.String // Превращаем NULL в пустую строку
+		f.Error = dbErr.String
 		files = append(files, f)
 	}
 
