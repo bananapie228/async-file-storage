@@ -120,7 +120,7 @@ func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*dom
 	).Scan(&req.ID, &req.Status, &req.CreatedAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, fmt.Errorf("request not found")
+		return nil, nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, nil, err
@@ -147,4 +147,25 @@ func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*dom
 	}
 
 	return req, files, nil
+}
+
+// GetFile returns a file by request and file id.
+func (r *PostgresRepository) GetFile(ctx context.Context, requestID int, fileID int) (*domain.FileEntry, error) {
+	var f domain.FileEntry
+	var dbErr sql.NullString
+
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id, request_id, url, data, error_msg FROM files WHERE request_id = $1 AND id = $2",
+		requestID, fileID,
+	).Scan(&f.ID, &f.RequestID, &f.URL, &f.Data, &dbErr)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	f.Error = dbErr.String
+	return &f, nil
 }
