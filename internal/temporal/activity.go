@@ -2,14 +2,14 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"async-file-storage/internal/domain"
-
-	"golang.org/x/sync/errgroup"
 )
 
 type Activities struct {
@@ -17,48 +17,82 @@ type Activities struct {
 }
 
 // download multiple files and save to the DB
-func (a *Activities) DownloadFilesActivity(ctx context.Context, RequestID int, urls []string) ([]string, error) {
-	// Create an errgroup to limit concurrent downloads
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(3)
+func (a *Activities) DownloadFilesActivity(ctx context.Context, requestID int, urls []string, timeout time.Duration) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	results := make([]string, len(urls))
+	var (
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, 3)
+		results = make([]string, len(urls))
+		mu      sync.Mutex
+		done    = make([]bool, len(urls))
+	)
 
 	for i, url := range urls {
+		if ctx.Err() != nil {
+			break
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+
 		index := i
 		link := url
 
-		g.Go(func() error {
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return
 			}
 
-			fmt.Printf("[%d] downloading: %s/n ", index, link)
+			fmt.Printf("[%d] downloading: %s\n", index, link)
 
 			data, downloadErr := downloadHelper(ctx, link)
-
-			dbErr := a.Repo.UpdateFileStatus(ctx, RequestID, link, data, downloadErr)
-
-			if dbErr != nil {
-				fmt.Printf("downloading error: %v/n,", dbErr)
-				return fmt.Errorf("database error: %w/n", dbErr)
-			}
-
 			if downloadErr != nil {
-				fmt.Printf("download failed for %s: %v\\n", link, downloadErr)
-				return downloadErr
+				downloadErr = mapDownloadError(downloadErr)
 			}
-			results[index] = fmt.Sprintf("File %s processed successfully", link)
-			return nil
 
-		})
+			if dbErr := a.Repo.UpdateFileStatus(ctx, requestID, link, data, downloadErr); dbErr != nil {
+				fmt.Printf("db update error: %v\n", dbErr)
+				return
+			}
 
+			if downloadErr == nil {
+				results[index] = fmt.Sprintf("File %s processed successfully", link)
+			}
+
+			mu.Lock()
+			done[index] = true
+			mu.Unlock()
+		}()
 	}
-	if err := g.Wait(); err != nil {
-		return nil, err
+
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		statusCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for i, url := range urls {
+			mu.Lock()
+			alreadyDone := done[i]
+			mu.Unlock()
+			if alreadyDone {
+				continue
+			}
+			_ = a.Repo.UpdateFileStatus(statusCtx, requestID, url, nil, errors.New("TIMEOUT"))
+		}
 	}
+
+	statusCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := a.Repo.UpdateRequestStatus(statusCtx, requestID, domain.StatusDone); err != nil {
+		return nil, fmt.Errorf("update request status: %w", err)
+	}
+
 	return results, nil
-
 }
 
 // actual HTTP request to get the file bytes
@@ -66,13 +100,13 @@ func downloadHelper(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w/n", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to request: %w/n", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	defer resp.Body.Close()
@@ -82,4 +116,11 @@ func downloadHelper(ctx context.Context, url string) ([]byte, error) {
 	}
 	return io.ReadAll(resp.Body)
 
+}
+
+func mapDownloadError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return errors.New("TIMEOUT")
+	}
+	return errors.New("DOWNLOAD_FAILED")
 }

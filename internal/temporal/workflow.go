@@ -9,10 +9,10 @@ import (
 
 // DownloadWorkflow orchestrates the file downloading process.
 // Now it takes requestID to track progress in the database.
-func DownloadWorkflow(ctx workflow.Context, requestID int, urls []string) ([]string, error) {
+func DownloadWorkflow(ctx workflow.Context, requestID int, urls []string, timeout time.Duration) ([]string, error) {
 	// Define Activity options: timeout and retry policy
 	options := workflow.ActivityOptions{
-		StartToCloseTimeout: 10 * time.Minute,
+		StartToCloseTimeout: timeout + time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    time.Second,
 			BackoffCoefficient: 2.0,
@@ -30,7 +30,7 @@ func DownloadWorkflow(ctx workflow.Context, requestID int, urls []string) ([]str
 
 	// Execute the downloading activity
 	var results []string
-	err := workflow.ExecuteActivity(ctx, a.DownloadFilesActivity, requestID, urls).Get(ctx, &results)
+	err := workflow.ExecuteActivity(ctx, a.DownloadFilesActivity, requestID, urls, timeout).Get(ctx, &results)
 
 	if err != nil {
 		logger.Error("Workflow failed", "Error", err)
