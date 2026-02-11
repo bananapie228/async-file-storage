@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	"async-file-storage/internal/repository"
 	"async-file-storage/internal/temporal"
@@ -18,6 +19,7 @@ func main() {
 		"https://raw.githubusercontent.com/temporalio/samples-go/master/README.md",
 		"https://google.com",
 	}
+	timeout := 60 * time.Second
 
 	requestID, err := repo.CreateRequest(context.Background(), urls)
 	if err != nil {
@@ -36,7 +38,7 @@ func main() {
 		TaskQueue: "file-storage-tasks",
 	}
 
-	we, err := c.ExecuteWorkflow(context.Background(), options, temporal.DownloadWorkflow, requestID, urls)
+	we, err := c.ExecuteWorkflow(context.Background(), options, temporal.DownloadWorkflow, requestID, urls, timeout)
 	if err != nil {
 		log.Fatalln("Unable to execute workflow", err)
 	}
