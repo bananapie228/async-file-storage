@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -25,7 +26,19 @@ func main() {
 	if dsn == "" {
 		user := os.Getenv("DB_USER")
 		password := os.Getenv("DB_PASSWORD")
-		dsn = "postgres://" + user + ":" + password + "@localhost:5433/downloader?sslmode=disable"
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5433"
+		}
+		name := os.Getenv("DB_NAME")
+		if name == "" {
+			name = "downloader"
+		}
+		dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, password, host, port, name)
 	}
 	repo, err := repository.NewPostgresRepository(dsn)
 	if err != nil {
