@@ -22,6 +22,7 @@ import (
 
 func main() {
 	_ = godotenv.Load()
+	// TODO: нужна структура Config и метод для ее загрузки из env, а не куча отдельных переменных
 	dsn := os.Getenv("DB_URL")
 	if dsn == "" {
 		user := os.Getenv("DB_USER")
@@ -61,6 +62,7 @@ func main() {
 	finalHandler = httptransport.Logging(finalHandler)
 
 	srv := &http.Server{
+		// TODO: port должен быть в конфиге
 		Addr:    ":8080",
 		Handler: finalHandler,
 	}

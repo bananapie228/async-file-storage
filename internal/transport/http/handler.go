@@ -28,6 +28,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleCreate(w, r)
 			return
 		}
+		// TODO: дублируешь METHOD_NOW_ALLOWED, можно переделать writeError
+		// и такие вспомогательные функции можно вынести в отдельный файл helpers/utils
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
@@ -138,6 +140,7 @@ func (h *Handler) handleGetFile(w http.ResponseWriter, r *http.Request, requestI
 	_, _ = w.Write(out.Data)
 }
 
+// TODO: можно функции ниже вынести в отдельный файл
 func writeUsecaseError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, usecase.ErrInvalidInput):

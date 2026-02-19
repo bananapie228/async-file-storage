@@ -63,6 +63,7 @@ func (r *PostgresRepository) CreateRequest(ctx context.Context, urls []string) (
 		return 0, err
 	}
 	defer func() {
+		// TODO: лучше commit и rollback обрабатывать здесь, если ошибки нет, то вызовется commit, иначе rollback
 		_ = tx.Rollback()
 	}()
 
@@ -84,6 +85,7 @@ func (r *PostgresRepository) CreateRequest(ctx context.Context, urls []string) (
 		}
 	}
 
+	// можно перенести commit в defer
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -112,6 +114,10 @@ func (r *PostgresRepository) UpdateFileStatus(ctx context.Context, requestID int
 }
 
 // GetRequestStatus returns the request and all associated files.
+// TODO: как думаешь хорошо ли что мы возвращаем fileEntry где есть поле data, которое может занимать много памяти,
+// может стоит возвращать его только в GetFile, а здесь возвращать только метаинформацию о файлах, например id, url и error?
+// Представь что у тебя есть файл с размером 1ГБ, и ты хочешь получить статус запроса, тебе не нужно загружать весь этот файл в память,
+// а так как у тебя сейчас устроено, ты его загрузишь, а потом просто не будешь использовать, что может привести к проблемам с памятью
 func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*domain.DownloadRequest, []domain.FileEntry, error) {
 	req := &domain.DownloadRequest{}
 	// Поправил WHEERE -> WHERE
@@ -119,6 +125,7 @@ func (r *PostgresRepository) GetRequestStatus(ctx context.Context, id int) (*dom
 		"SELECT id, status, created_at FROM requests WHERE id = $1", id,
 	).Scan(&req.ID, &req.Status, &req.CreatedAt)
 
+	// TODO: сначала лучше сделать if err != nil, а внутри него уже проверять на sql.ErrNoRows и на др. ошибку
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, domain.ErrNotFound
 	}
@@ -159,6 +166,7 @@ func (r *PostgresRepository) GetFile(ctx context.Context, requestID int, fileID 
 		requestID, fileID,
 	).Scan(&f.ID, &f.RequestID, &f.URL, &f.Data, &dbErr)
 
+	// TODO: сначала лучше сделать if err != nil, а внутри него уже проверять на sql.ErrNoRows и на др. ошибку
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}

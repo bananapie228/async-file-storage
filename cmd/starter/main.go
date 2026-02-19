@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	// TODO: структура Config
 	_ = godotenv.Load()
 	dsn := os.Getenv("DB_URL")
 	if dsn == "" {
