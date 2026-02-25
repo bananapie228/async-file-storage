@@ -10,6 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// TODO: в чем смысл функции? Она просто пингует БД. Тем более у тебя это есть в репозитории.
+// Также до этого ты использовал пакет "database/sql", а здесь перешел на "github.com/jackc/pgx/v5".
+// Лучше не смешивать либы
 func main() {
 	_ = godotenv.Load()
 	url := os.Getenv("DB_URL")

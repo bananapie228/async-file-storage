@@ -47,6 +47,8 @@ func (s *Service) GetRequest(ctx context.Context, id int) (GetRequestOutput, err
 
 	req, files, err := s.repo.GetRequestStatus(ctx, id)
 	if err != nil {
+		// TODO: обрабатываешь одну и ту же ошибку только из разных пакетов,
+		// может стоит унифицировать ошибку NotFound в одном пакете и использовать её везде?
 		if errors.Is(err, ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
 			return GetRequestOutput{}, ErrNotFound
 		}
@@ -57,6 +59,9 @@ func (s *Service) GetRequest(ctx context.Context, id int) (GetRequestOutput, err
 	out.Files = make([]FileStatus, 0, len(files))
 	for _, f := range files {
 		status := FileStatus{URL: f.URL}
+		// лучше возвращать указатель чтобы сравнивать через f.Error != nil, а не через пустую строку,
+		// так как может быть ситуация когда ошибка есть, но она не описана, и тогда будет возвращаться пустая строка,
+		// что может ввести в заблуждение
 		if f.Error != "" {
 			status.ErrorCode = f.Error
 		} else {
@@ -74,6 +79,8 @@ func (s *Service) GetFile(ctx context.Context, requestID int, fileID int) (GetFi
 
 	file, err := s.repo.GetFile(ctx, requestID, fileID)
 	if err != nil {
+		// TODO: та же ситуация с ошибкой NotFound, надо унифицировать её в одном пакете и использовать везде,
+		// чтобы не проверять её из разных пакетов
 		if errors.Is(err, ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
 			return GetFileOutput{}, ErrNotFound
 		}

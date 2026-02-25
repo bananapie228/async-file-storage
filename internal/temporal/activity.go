@@ -13,10 +13,14 @@ import (
 )
 
 type Activities struct {
+	// можно сделать переменную приватной, я не увидел где ты ее присваиваешь извне,
+	// а так она может быть изменена в любой момент и это может привести к проблемам,
+	// если кто-то случайно присвоит ей другое значение
 	Repo domain.Storage
 }
 
 // download multiple files and save to the DB
+// TODO: этот метод надо отрефакторить, слишком много кода
 func (a *Activities) DownloadFilesActivity(ctx context.Context, requestID int, urls []string, timeout time.Duration) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -48,6 +52,8 @@ func (a *Activities) DownloadFilesActivity(ctx context.Context, requestID int, u
 				return
 			}
 
+			// TODO: надо еще обрабатывать случай, если произойдет таймаут через select и ctx.Done(), чтобы не запускать загрузку, которая уже не нужна
+
 			fmt.Printf("[%d] downloading: %s\n", index, link)
 
 			data, downloadErr := downloadHelper(ctx, link)
@@ -65,8 +71,11 @@ func (a *Activities) DownloadFilesActivity(ctx context.Context, requestID int, u
 			}
 
 			mu.Lock()
+			// TODO: лучше писать defer mu.Unlock() сразу после Lock
+			// если я здесь пропишу panic("something"), у тебя произойдет deadlock, потому что Unlock не вызовется,
+			// а так, даже если будет паника, Unlock все равно вызовется и другие горутины не будут висеть в ожидании разблокировки
 			done[index] = true
-			mu.Unlock()
+			mu.Unlock() // это в defer
 		}()
 	}
 
